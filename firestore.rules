@@ -1,0 +1,70 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: orders
+    // Document ID: auto-generated
+    // Fields:
+    //   - customer: map (required) - name, email, phone, address, city, country, postalCode
+    //   - items: list (required) - array of cart items
+    //   - total: number (required) - total order cost
+    //   - status: string (required) - 'pending'
+    //   - createdAt: timestamp (required)
+    //
+    // Collection: users
+    // Document ID: user uid
+    // Fields:
+    //   - email: string
+    //   - role: string ('admin' | 'customer')
+    //
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() &&
+        (
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
+          (request.auth.token.email == "nikitamelnik@gmail.com" && request.auth.token.email_verified == true)
+        );
+    }
+
+    function isValidOrder() {
+      let data = request.resource.data;
+      return data.keys().hasAll(['customer', 'items', 'total', 'status', 'createdAt']) &&
+             data.customer is map &&
+             data.customer.keys().hasAll(['name', 'email', 'phone', 'address', 'city', 'country', 'postalCode']) &&
+             data.customer.name is string && data.customer.name.size() > 0 && data.customer.name.size() < 100 &&
+             data.customer.email is string && data.customer.email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$") &&
+             data.customer.phone is string && data.customer.phone.size() < 20 &&
+             data.customer.address is string && data.customer.address.size() > 0 && data.customer.address.size() < 200 &&
+             data.customer.city is string && data.customer.city.size() > 0 && data.customer.city.size() < 100 &&
+             data.customer.country is string && data.customer.country.size() > 0 && data.customer.country.size() < 100 &&
+             data.customer.postalCode is string && data.customer.postalCode.size() > 0 && data.customer.postalCode.size() < 20 &&
+             data.items is list && data.items.size() > 0 && data.items.size() < 100 &&
+             data.total is number && data.total >= 0 &&
+             data.status == 'pending' &&
+             data.createdAt is timestamp;
+    }
+
+    match /orders/{orderId} {
+      // Anyone can create an order (guest checkout)
+      allow create: if isValidOrder();
+      // Only admins can read/update/delete orders
+      allow read, update, delete: if isAdmin();
+    }
+    
+    match /users/{userId} {
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+      allow write: if isAdmin();
+    }
+  }
+}
